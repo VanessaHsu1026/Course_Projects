@@ -1,6 +1,5 @@
 ---
 title: 'HW1: Comparison of AE and VAE'
-
 ---
 
 # HW1: Comparison of AE and VAE
@@ -745,4 +744,3 @@ save_dir_VAE = 'VAE_reconstructions_FD'
 VAE_PSNR, VAE_SSIM = Evaluate(VAE_trained, dataloader_o, image_ids, save_dir_VAE)
 print(f'VAE with FD - Average PSNR: {VAE_PSNR}, Average SSIM: {VAE_SSIM}')
 ```
-
