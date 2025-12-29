@@ -1,5 +1,4 @@
 Environment Setup (for Windows):
-
 1.  Install Visual Studio Code 
 2.  Click Extensions
 3.  Install C/C++, C/C++ Extension Pack, C/C++ Themes 
@@ -21,7 +20,6 @@ Environment Setup (for Windows):
 19. Completion of environmental construction
 
 Running the Code:
-
 1.  Copy and paste the three C++ programs (flip, resolution, cropping) from the "hw1_113064525" folder into the "C++" folder
 2.  Add the BMP input files to the "C++" folder (note that the file names of the BMP input files must be consistent with the code)
 3.  Open the "C++" folder in Visual Studio Code to run the three C++ programs
