@@ -1,19 +1,21 @@
+# my_dataloader.py
 import os
 from torch.utils.data import Dataset
 from PIL import Image
 from torchvision import transforms
 # 用於使用兩個control net的，可能會需要depth map或edge map之類的
+# input是用沒有transform的
 class MultiControlDataset(Dataset):
     def __init__(self, root_dir="./dataset", size=512):
         # 假設你的 dataset 資料夾結構如下：
         # ./dataset/
         #    ├── ground_truth/   (目標圖 RGB)
-        #    ├── input_images/   (原始圖 RGB - 用來生 Depth 的來源)
-        #    └── input_depth/    (我們會把生成的 Depth 存這裡)
+        #    ├── input_images/   (原始圖 RGB)
+        #    └── input_depth/    (GT 生成的 Depth 存這裡)
         
         self.gt_dir = os.path.join(root_dir, "ground_truth")
-        self.canny_dir = os.path.join(root_dir, "warp_depth") # 注意：這是從 GT 生成的 Depth
-        self.tile_dir = os.path.join(root_dir, "warp_input")   # 注意：這是原始壞圖
+        self.canny_dir = os.path.join(root_dir, "input_depth") # 注意：這是從 GT 生成的 Depth
+        self.tile_dir = os.path.join(root_dir, "input_images")   # 注意：這是原始壞圖
         self.size = size
         
         # 取得檔名列表 (以 GT 資料夾為基準)

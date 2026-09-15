@@ -14,11 +14,16 @@ import torchvision.transforms.functional as TF
 import random
 from tqdm import tqdm
 
-test_name = "test" # 可以自己取 方便放不同實驗的東東
-os.makedirs(test_name, exist_ok=True)
+"""
+執行指令: 
+        CUDA_VISIBLE_DEVICES=8 python train.py
+"""
 
-cnet_depth = ControlNetModel.from_pretrained("lllyasviel/control_v11f1p_sd15_depth").to("cuda")
-cnet_tile = ControlNetModel.from_pretrained("lllyasviel/control_v11f1e_sd15_tile").to("cuda")
+test_name = "checkpoints" # 可以自己取
+os.makedirs(test_name, exist_ok=True)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+cnet_depth = ControlNetModel.from_pretrained("lllyasviel/control_v11f1p_sd15_depth").to(device)
+cnet_tile = ControlNetModel.from_pretrained("lllyasviel/control_v11f1e_sd15_tile").to(device)
 multi_controlnet = MultiControlNetModel([cnet_depth, cnet_tile])
 multi_controlnet.train()
 
@@ -26,13 +31,13 @@ cnet_depth.requires_grad_(True)
 cnet_tile.requires_grad_(True)
 
 # 載入 SD1.5 的 VAE 和 Text Encoder (這兩個通常不訓練)
-vae = AutoencoderKL.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="vae").to("cuda")
+vae = AutoencoderKL.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="vae").to(device)
 tokenizer = CLIPTokenizer.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="tokenizer")
-text_encoder = CLIPTextModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="text_encoder").to("cuda")
+text_encoder = CLIPTextModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="text_encoder").to(device)
 scheduler = DDPMScheduler.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="scheduler")
-unet = UNet2DConditionModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="unet").to("cuda")
+unet = UNet2DConditionModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="unet").to(device)
 # 我們從一個空的 ControlNet 開始，或者從現有的載入
-# controlnet = ControlNetModel.from_pretrained("lllyasviel/control_v11f1p_sd15_depth").to("cuda") # 可以讀取RGB
+# controlnet = ControlNetModel.from_pretrained("lllyasviel/control_v11f1p_sd15_depth").to(device) # 可以讀取RGB
 
 # lora_config = LoraConfig(
 #     r=16,               # Rank: 數字越大越聰明但參數量越多 (8, 16, 32)
@@ -55,19 +60,19 @@ unet.requires_grad_(False)
 vae.requires_grad_(False)
 text_encoder.requires_grad_(False)
 
-train_dataset = MultiControlDataset(root_dir="./dataset") 
+train_dataset = MultiControlDataset(root_dir="./dataset_split/train") 
 train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 optimizer = torch.optim.AdamW(multi_controlnet.parameters(), lr=5e-5)
 
 # prior loss
 # pipe = StableDiffusionPipeline.from_pretrained(
 #     "runwayml/stable-diffusion-v1-5",
-# ).to("cuda")
+# ).to(device)
 # pipe.unet.eval()
 # pipe.vae.eval()
 # pipe.text_encoder.eval()
 if not os.path.exists("./prior_images"): # 避免每次重跑都重新生成
-    pipe = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", safety_checker=None).to("cuda")
+    pipe = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", safety_checker=None).to(device)
     pipe.set_progress_bar_config(disable=True)
     
     prior_dir = "./prior_images"
@@ -85,36 +90,36 @@ if not os.path.exists("./prior_images"): # 避免每次重跑都重新生成
 
 prior_dir = "./prior_images"
 prior_images_list = [os.path.join(prior_dir, f) for f in os.listdir(prior_dir)]
-prior_images_tensors = [TF.to_tensor(Image.open(p).convert("RGB")).unsqueeze(0).to("cuda") for p in prior_images_list]
+prior_images_tensors = [TF.to_tensor(Image.open(p).convert("RGB")).unsqueeze(0).to(device) for p in prior_images_list]
 
 # 3. 設定訓練參數
 num_epochs = 100
 epoch_loss_history = []
-lpips_loss_fn = lpips.LPIPS(net='vgg').to("cuda")
+lpips_loss_fn = lpips.LPIPS(net='vgg').to(device)
 
 def train_step(batch):
     batch_size = batch["target"].shape[0]
     # 準備 Text Embeddings (空的 Prompt)
     # text_inputs = tokenizer([""] * batch_size, padding="max_length", max_length=tokenizer.model_max_length, return_tensors="pt")
-    # encoder_hidden_states = text_encoder(text_inputs.input_ids.to("cuda"))[0]
+    # encoder_hidden_states = text_encoder(text_inputs.input_ids.to(device))[0]
 
     encoder_hidden_states = text_encoder(
-        tokenizer("a photo of a person", return_tensors="pt").input_ids.to("cuda")
+        tokenizer("a photo of a person", return_tensors="pt").input_ids.to(device)
     )[0].repeat(batch_size, 1, 1)
 
     # B. 處理 Target Image (GT) -> 轉成 Latents -> 加雜訊
-    latents = vae.encode(batch["target"].to("cuda")).latent_dist.sample()
+    latents = vae.encode(batch["target"].to(device)).latent_dist.sample()
     latents = latents * 0.18215
 
     # 加噪 (Forward Diffusion)
     noise = torch.randn_like(latents)
-    timesteps = torch.randint(0, scheduler.num_train_timesteps - 10, ()).to("cuda")
+    timesteps = torch.randint(0, scheduler.num_train_timesteps - 10, ()).to(device)
     noisy_latents = scheduler.add_noise(latents, noise, timesteps)
 
     # C. 處理 Input Image (Condition)
     # 這是關鍵！把你的「歪頭照」當作 ControlNet 的輸入
-    cond_depth = batch["cond_depth"].to("cuda")
-    cond_tile = batch["cond_tile"].to("cuda")
+    cond_depth = batch["cond_depth"].to(device)
+    cond_tile = batch["cond_tile"].to(device)
     controlnet_images = [cond_depth, cond_tile]
     # D. 模型預測 (Forward Pass)
     # 1. ControlNet 算出控制特徵
@@ -147,10 +152,10 @@ def train_step(batch):
     # pred_images = vae.decode(pred_latents / 0.18215).sample
     # pred_images = (pred_images + 1) / 2
 
-    #recon_loss = torch.nn.functional.l1_loss(pred_images, batch["target_image"].to("cuda"))
+    #recon_loss = torch.nn.functional.l1_loss(pred_images, batch["target_image"].to(device))
 
     # ---- LPIPS loss ----
-    # gt_images = (batch["target_image"].to("cuda") + 1) / 2
+    # gt_images = (batch["target_image"].to(device) + 1) / 2
     # lpips_loss = lpips_loss_fn(pred_images, gt_images).mean()
 
     # -----------------------------------------------------
@@ -160,7 +165,7 @@ def train_step(batch):
     prior_img = random.choice(prior_images_tensors)
     prior_latent = vae.encode(prior_img).latent_dist.sample() * 0.18215
     prior_noise = torch.randn_like(prior_latent)
-    prior_t = torch.randint(0, scheduler.num_train_timesteps - 10, ()).to("cuda")
+    prior_t = torch.randint(0, scheduler.num_train_timesteps - 10, ()).to(device)
     noisy_prior = scheduler.add_noise(prior_latent, prior_noise, prior_t)
 
     # Text conditioning uses SAME prompt as training
